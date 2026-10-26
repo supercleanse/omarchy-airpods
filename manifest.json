@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "supercleanse.airpods",
+  "name": "AirPods",
+  "version": "0.1.0",
+  "author": "supercleanse",
+  "license": "MIT",
+  "homepage": "https://github.com/supercleanse/omarchy-airpods",
+  "description": "Paired AirPods status and explicit audio and stem-control setup.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {"barWidget": "Panel.qml"},
+  "barWidget": {
+    "displayName": "AirPods",
+    "category": "Audio",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
