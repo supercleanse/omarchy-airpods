@@ -2,7 +2,7 @@
 
 AirPods stem controls, music and call reconnection settings, and optional trusted-device pairing recovery for Omarchy.
 
-The existing speaker icon opens one audio panel with **Audio / AirPods** tabs at the top. Audio keeps the volume sliders, output/input pickers, and per-app mixer. AirPods shows connected devices and offers setup, reconnect, and undo. No extra bar icon. The settings live in your Linux user configuration and work across music players. No Aldus dependency, custom BlueZ build, or background reconnect loop.
+The existing speaker icon opens one audio panel with **Audio / AirPods** tabs at the top. Audio keeps the volume sliders, output/input pickers, and per-app mixer. The top switch and speaker-icon right-click mute output only; microphone mute is separate in the Input controls. AirPods shows connected devices and offers setup, reconnect, and undo. No extra bar icon. The settings live in your Linux user configuration and work across music players. No Aldus dependency, custom BlueZ build, or background reconnect loop.
 
 ## Install
 

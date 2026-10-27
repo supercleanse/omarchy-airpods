@@ -38,3 +38,9 @@ The separate AirPods icon was removed before migration. The cloned audio widget 
 Both Audio and AirPods pages were opened and visually inspected in the running shell. The Audio page exposed the existing output/input devices and app mixer. The AirPods page reported configured controls and the connected device. Actual keyboard events verified Ctrl+Tab switching, Escape dismissal, and defaulting to Audio when opened through the existing `omarchy.audio` IPC. Arrow keys on the AirPods page did not alter either audio volume. No apply/restore or Bluetooth restart was performed for this UI migration.
 
 The backend remains unchanged from 0.1.0, with all 72 tests passing. See NOTICE.md for the stock audio source, included license, and the scoped-API limitation on selected-media highlighting.
+
+## Microphone mute and rule correction (0.2.1)
+
+A reported microphone failure was traced to the selected AirPods input being muted. Unmuting restored speech, confirmed by the user. The inherited Audio master switch also muted the microphone; the plugin now makes the main switch, its keyboard action, and speaker-icon right-click affect output only. A live keyboard test toggled the header twice and verified the microphone remained unmuted.
+
+Runtime logs also exposed a separate generated-rule bug: `actions.update-props` was emitted as a single rule key, which WirePlumber ignored. Rules now use nested `actions = { update-props = {...} }`. Native SPA parsing verifies the resulting object structure. Tests cover colon/underscore node names, optional suffixes, exact device boundaries, tracked upgrades, and rollback to the original baseline. All 76 local tests passed. Installed rules parsed correctly and WirePlumber restarted without the earlier unknown-key/no-actions warnings. The native parser regression is skipped on test runners without `spa-json-dump`; it ran on the tested laptop.

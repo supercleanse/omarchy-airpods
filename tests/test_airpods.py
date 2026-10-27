@@ -4,6 +4,8 @@ import io
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,18 @@ spec.loader.exec_module(a)
 # Synthetic locally administered addresses, never real hardware identifiers.
 MAC = ':'.join(['02'] + ['00'] * 4 + ['01'])
 OTHER = ':'.join(['02'] + ['00'] * 4 + ['02'])
+SPA_JSON_DUMP = shutil.which('spa-json-dump')
+# Previous release's exact rule layout, for tracked-installation upgrades.
+LEGACY_FRAGMENT = ('''# Managed by omarchy-airpods
+monitor.bluez.properties = { bluez5.dummy-avrcp-player = true }
+monitor.bluez.rules = [
+  { matches = [ { device.name = "bluez_card.MAC" } ]
+    actions.update-props = { bluez5.auto-connect = [ hfp_hf hfp_ag a2dp_sink a2dp_source ] } }
+  { matches = [ { node.name = "~bluez_input[.]MAC[.].*" }
+                  { node.name = "~bluez_output[.]MAC[.].*" } ]
+    actions.update-props = { session.suspend-timeout-seconds = 0 } }
+]
+'''.replace('MAC', MAC.replace(':', '_'))).encode()
 
 
 def device(address=MAC, **kwargs):
@@ -83,6 +97,96 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(self.system.units[a.UNITS[0]]['enabled'], 'enabled')
         self.assertEqual(self.m.restore(), 'Nothing to restore')
         self.assertFalse(any(x[0] == 'reconnect' for x in self.system.calls))
+
+    def assert_node_matches(self, patterns, address):
+        self.assertEqual(len(patterns), 2)
+        for pattern in patterns:
+            self.assertTrue(pattern.startswith('~^'))
+            self.assertTrue(pattern.endswith('$'))
+            self.assertNotIn('\\', pattern)
+        def matches(name):
+            return any(re.search(pattern[1:], name) for pattern in patterns)
+        for direction in ('input', 'output'):
+            for formatted in (address, address.replace(':', '_')):
+                for suffix in ('', '.1', '.profile'):
+                    name = 'bluez_' + direction + '.' + formatted + suffix
+                    self.assertTrue(matches(name), name)
+                for name in ('prefix_bluez_' + direction + '.' + formatted,
+                             'bluez_' + direction + 'X' + formatted,
+                             'bluez_' + direction + '.' + formatted + '0',
+                             'bluez_' + direction + '.' + formatted + '_other',
+                             'bluez_' + direction + '.' + formatted + '.'):
+                    self.assertFalse(matches(name), name)
+            other = OTHER if address == MAC else MAC
+            for formatted in (other, other.replace(':', '_')):
+                for suffix in ('', '.1'):
+                    name = 'bluez_' + direction + '.' + formatted + suffix
+                    self.assertFalse(matches(name), name)
+
+    def test_fragment_node_matching_boundaries(self):
+        # Extract only quoted patterns, not a substitute configuration parser.
+        text = a.fragment([MAC]).decode()
+        patterns = re.findall(r'node[.]name = "([^"]+)"', text)
+        self.assert_node_matches(patterns, MAC)
+        self.assertNotIn('actions.update-props', text)
+
+    @unittest.skipUnless(SPA_JSON_DUMP, 'spa-json-dump is not installed')
+    def test_fragment_native_spa_structure_and_matches(self):
+        path = self.root / 'generated.conf'
+        path.write_bytes(a.fragment([OTHER, MAC]))
+        proc = subprocess.run([SPA_JSON_DUMP, str(path)], capture_output=True,
+                              text=True, timeout=10, check=True)
+        parsed = json.loads(proc.stdout)
+        self.assertIs(parsed['monitor.bluez.properties']['bluez5.dummy-avrcp-player'], True)
+        rules = parsed['monitor.bluez.rules']
+        self.assertEqual(len(rules), 4)
+        for index, address in enumerate(sorted([MAC, OTHER])):
+            card, node = rules[index * 2:index * 2 + 2]
+            for rule in (card, node):
+                self.assertEqual(set(rule), {'matches', 'actions'})
+                self.assertEqual(set(rule['actions']), {'update-props'})
+            self.assertEqual(card['matches'], [{'device.name': 'bluez_card.' + address.replace(':', '_')}])
+            self.assertEqual(card['actions']['update-props'], {
+                'bluez5.auto-connect': ['hfp_hf', 'hfp_ag', 'a2dp_sink', 'a2dp_source']})
+            self.assertEqual(node['actions']['update-props'], {'session.suspend-timeout-seconds': 0})
+            self.assert_node_matches([match['node.name'] for match in node['matches']], address)
+
+    def install_legacy_fragment(self):
+        a.atomic_write(self.m.paths['config'], b'# Original foreign fragment\n', 0o640)
+        a.put(self.m.paths[a.UNITS[0]], {'kind': 'link', 'target': '/dev/null'})
+        self.system.units[a.UNITS[0]].update(active=False, enabled='masked')
+        baseline = {k: a.snapshot(p) for k, p in self.m.paths.items()}
+        with patch.object(a, 'fragment', return_value=LEGACY_FRAGMENT):
+            self.m.apply()
+        self.system.calls.clear()
+        return baseline
+
+    def test_legacy_upgrade_preserves_original_baseline(self):
+        baseline = self.install_legacy_fragment()
+        prior = self.m.read('state.json')
+        self.m.apply()
+        self.assertEqual(self.m.paths['config'].read_bytes(), a.fragment([MAC]))
+        state = self.m.read('state.json')
+        self.assertEqual(state['entries']['config']['before'], baseline['config'])
+        self.assertEqual(state['services'], prior['services'])
+        self.assertEqual(self.system.calls.count(('try-restart', 'wireplumber.service')), 1)
+        calls = list(self.system.calls)
+        self.m.apply()
+        self.assertEqual(self.system.calls, calls)
+        self.m.restore()
+        self.assertEqual({k: a.snapshot(p) for k, p in self.m.paths.items()}, baseline)
+
+    def test_failed_legacy_upgrade_restores_tracked_config_and_baseline(self):
+        baseline = self.install_legacy_fragment()
+        prior = self.m.read('state.json')
+        self.system.fail = ('try-restart', 'wireplumber.service')
+        with self.assertRaisesRegex(a.Error, 'rolled back'):
+            self.m.apply()
+        self.assertEqual(self.m.paths['config'].read_bytes(), LEGACY_FRAGMENT)
+        self.assertEqual(self.m.read('state.json'), prior)
+        self.assertIsNone(self.m.read('pending.json'))
+        self.m.restore()
+        self.assertEqual({k: a.snapshot(p) for k, p in self.m.paths.items()}, baseline)
 
     def test_initial_masks_and_unrelated_configs_survive(self):
         for unit in a.UNITS:

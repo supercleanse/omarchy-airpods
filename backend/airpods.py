@@ -228,12 +228,16 @@ def fragment(addresses):
     lines = ['# Managed by omarchy-airpods', 'monitor.bluez.properties = { bluez5.dummy-avrcp-player = true }',
              'monitor.bluez.rules = [']
     for address in sorted(addresses):
-        mac = validate_mac(address).replace(':', '_')
+        address = validate_mac(address)
+        mac = address.replace(':', '_')
+        # Virtual sources may use colons and no suffix; sinks commonly use
+        # underscores and a profile suffix. Anchor the complete device address.
+        node_address = '(' + address + '|' + mac + ')([.].+)?$'
         lines += ['  { matches = [ { device.name = "bluez_card.' + mac + '" } ]',
-                  '    actions.update-props = { bluez5.auto-connect = [ hfp_hf hfp_ag a2dp_sink a2dp_source ] } }',
-                  '  { matches = [ { node.name = "~bluez_input[.]' + mac + '[.].*" }',
-                  '                  { node.name = "~bluez_output[.]' + mac + '[.].*" } ]',
-                  '    actions.update-props = { session.suspend-timeout-seconds = 0 } }']
+                  '    actions = { update-props = { bluez5.auto-connect = [ hfp_hf hfp_ag a2dp_sink a2dp_source ] } } }',
+                  '  { matches = [ { node.name = "~^bluez_input[.]' + node_address + '" }',
+                  '                  { node.name = "~^bluez_output[.]' + node_address + '" } ]',
+                  '    actions = { update-props = { session.suspend-timeout-seconds = 0 } } }']
     return ('\n'.join(lines + [']', ''])).encode()
 
 

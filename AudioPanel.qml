@@ -193,13 +193,9 @@ Ui.Panel {
   // "header" is a virtual section for the hero output mute toggle; it sits
   // above the output section so the speaker can be muted from the keyboard.
   readonly property bool headerHasCursor: cursorActive && focusSection === "header"
-  // Only channels that actually exist get a vote. A box with no default source
-  // would otherwise report "input unmuted" forever, leaving the hero switch
-  // able to mute but never to unmute.
+  // Speaker controls must not silently change microphone mute state.
   readonly property bool hasOutput: !!(volumeSink && volumeSink.audio)
-  readonly property bool hasInput: !!(source && source.audio)
-  readonly property bool anyAudible: (hasOutput && !outputMuted) || (hasInput && !inputMuted)
-  readonly property string toggleHint: anyAudible ? "Mute" : "Unmute"
+  readonly property string toggleHint: outputMuted ? "Unmute speakers" : "Mute speakers"
 
   readonly property color hoverFill: bar
     ? Commons.Style.hoverFillFor(bar.foreground, Commons.Color.accent)
@@ -313,7 +309,7 @@ Ui.Panel {
 
   // Enter/Space: activate whatever the cursor is on.
   function activateCursor() {
-    if (focusSection === "header") { toggleAllMuted(); return }
+    if (focusSection === "header") { toggleOutputMute(); return }
     if (focusSection === "output") {
       if (selectedIndex === -1) { toggleOutputMute(); return }
       var sink = displayAudioSinks[selectedIndex]
@@ -475,15 +471,6 @@ Ui.Panel {
 
   function toggleInputMute() {
     if (source && source.audio) source.audio.muted = !source.audio.muted
-  }
-
-  // The hero switch is the whole panel's on/off, so it carries both channels
-  // at once. It reads as on while anything is still audible, which keeps
-  // muting a single channel from the row below flipping the master switch.
-  function toggleAllMuted() {
-    var mute = anyAudible
-    if (hasOutput) volumeSink.audio.muted = mute
-    if (hasInput) source.audio.muted = mute
   }
 
   function setDefaultSink(node) {
@@ -659,7 +646,7 @@ Ui.Panel {
     bar: root.bar
     text: root.outputIcon()
     onPressed: function(b) {
-      if (b === Qt.RightButton) root.toggleAllMuted()
+      if (b === Qt.RightButton) root.toggleOutputMute()
       else root.toggle()
     }
 
@@ -816,18 +803,17 @@ Ui.Panel {
               anchors.verticalCenter: parent.verticalCenter
             }
 
-            // Compact on/off switch on the trailing edge of the hero, and the
-            // header's only cursor target. Checked means something is still
-            // audible, so muting everything reads as switching audio off.
+            // Speaker mute only. The input row controls microphone mute separately.
             ToggleSwitch {
               id: powerSwitch
-              checked: root.anyAudible
+              checked: root.hasOutput && !root.outputMuted
+              enabled: root.hasOutput
               hasCursor: root.headerHasCursor
               foreground: root.bar.foreground
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               onHovered: function(on) { if (on) root.setHeaderCursor() }
-              onToggled: root.toggleAllMuted()
+              onToggled: root.toggleOutputMute()
 
               PanelToolTip {
                 visible: powerSwitch.containsMouse
