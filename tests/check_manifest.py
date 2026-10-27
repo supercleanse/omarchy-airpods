@@ -23,4 +23,17 @@ for path in root.rglob('*'):
         assert not path.is_symlink(), str(path)
 for name in ('README.md', 'LICENSE', 'docs/PAIRING.md', 'docs/VALIDATION.md', 'NOTICE.md', 'licenses/OMARCHY-MIT.txt'):
     assert (root / name).is_file(), name
-print('Package metadata, entry points, docs, and symlink checks passed')
+companion = root / 'companions/bluetooth'
+bluetooth = json.loads((companion / 'manifest.json').read_text())
+assert bluetooth['id'] == 'supercleanse.airpods-bluetooth'
+assert bluetooth['omarchy']['clonedFrom'] == 'omarchy.bluetooth'
+assert bluetooth['version'] == manifest['version']
+assert bluetooth['kinds'] == ['bar-widget']
+for entry in bluetooth['entryPoints'].values():
+    path = Path(entry)
+    assert not path.is_absolute() and '..' not in path.parts
+    assert (companion / path).is_file()
+for name in ('Model.js', 'RecoveryContent.qml'):
+    assert (companion / name).is_file(), name
+assert (root / 'backend/bluetooth_setup.py').is_file()
+print('Audio and Bluetooth package metadata, entry points, docs, and symlink checks passed')

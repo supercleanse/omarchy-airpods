@@ -4,6 +4,12 @@ Media setup does not change Bluetooth pairing policy. Use this optional componen
 
 The agent accepts authorization only for locally selected devices that BlueZ still reports as **both paired and trusted**. It rejects other devices and PIN/passkey entry. Pair new devices in Omarchy's Bluetooth panel first. It does not recover a deleted bond or silently pair a new device.
 
+## Find AirPods in Bluetooth
+
+For nearby discovery and explicit connection recovery, install the optional Bluetooth companion using the [README instructions](../README.md#bluetooth-companion-030). Open the existing Bluetooth popup and choose **Find AirPods**, then follow its pairing-mode guidance and select a device explicitly. The action remains available when no AirPods are listed. It does not enable the persistent agent or change system policy merely by opening the popup.
+
+The companion and the agent solve different problems. Find AirPods provides an interactive recovery workflow; the optional agent below handles authorization for selected devices that remain paired and trusted. Installing or removing the companion does not install or remove that agent. Update the companion copy with `backend/bluetooth_setup.py update` after updating the root Audio plugin.
+
 ## Enable the user agent
 
 The optional agent needs Arch packages `python-dbus` and `python-gobject`, in addition to the normal plugin requirements. Install missing packages with:

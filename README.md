@@ -22,6 +22,39 @@ Enabling the plugin replaces Omarchy’s built-in audio widget in its existing p
 | Double press | Next track |
 | Triple press | Previous track or restart the current track, depending on the player |
 
+## Bluetooth companion (0.3.0)
+
+The optional companion adds **Find AirPods** to the existing Bluetooth popup, including when no AirPods are listed. It keeps the stock Bluetooth controls and the existing Audio / AirPods widget. This is nearby discovery and connection recovery, not Apple Find My tracking.
+
+Install from the root plugin's git checkout, as your desktop user:
+
+```sh
+cd ~/.config/omarchy/plugins/supercleanse.airpods
+python3 backend/bluetooth_setup.py install
+python3 backend/bluetooth_setup.py enable
+```
+
+A development checkout can run the same helper directly; it resolves source files relative to itself, not the current working directory. `install` validates and copies `companions/bluetooth/`, the shared backend, and licenses into `~/.config/omarchy/plugins/supercleanse.airpods-bluetooth/`. It rescans plugins but does not activate the companion. `enable` requires exactly one stock Bluetooth bar slot and refuses a conflicting active Bluetooth clone. Omarchy replaces that slot in place, retaining its settings and every other entry. No extra icon is added. If the slot is missing, restore the stock Bluetooth entry deliberately before enabling.
+
+The companion is a self-contained copy with no symlinks or dependency on the Audio checkout at runtime. It shares the backend's existing user state and locks. Keep the root checkout as its update source:
+
+```sh
+omarchy plugin update supercleanse.airpods
+python3 ~/.config/omarchy/plugins/supercleanse.airpods/backend/bluetooth_setup.py update
+```
+
+Updating the root plugin alone does not refresh the companion. Do not run `omarchy plugin update supercleanse.airpods-bluetooth`: the copy is not a git checkout. Repeating `install` also refreshes a helper-owned copy, without enabling it. Updates preserve its enabled state. No QML startup hook installs or updates files.
+
+The helper records source revision, file hashes, and modes in `.airpods-package.json`. It refuses unrelated installations, changed files, added files, unsafe ownership, and symlinks. One clean prior package remains at `~/.config/omarchy/plugins/.supercleanse.airpods-bluetooth.previous`. Updates also refuse an edited backup. Source revision identifies the checkout's HEAD; hashes record the actual copied bytes, including development edits. A failed deployment rescan rolls back the package files. If the process stops between directory renames, the complete previous copy remains in that hidden folder; keep it until the installed package has been checked.
+
+Remove the companion before removing the root checkout:
+
+```sh
+python3 backend/bluetooth_setup.py remove
+```
+
+Removal disables the companion through Omarchy, restoring stock Bluetooth in its current slot, and retains the removed copy in the hidden backup folder. It does not remove Audio, undo media settings, disable the optional pairing agent, or change BlueZ policy. `status` reports package ownership without changing files. All helper actions run as your desktop user; never use sudo or pkexec.
+
 ## Update from v0.1
 
 Version 0.1 had a separate AirPods icon. Disable that entry **before** updating so Omarchy can replace the existing Audio entry instead of retaining two icons:
@@ -64,7 +97,7 @@ Optional pairing recovery is described in [pairing recovery](docs/PAIRING.md). I
 
 ## Remove
 
-Choose **Undo plugin setup** in the audio panel’s AirPods tab, or run `python3 backend/airpods.py restore` from its installed directory. If you enabled optional pairing recovery, undo it using the instructions in [pairing recovery](docs/PAIRING.md). Then remove the plugin (Omarchy restores the normal audio widget):
+Choose **Undo plugin setup** in the audio panel’s AirPods tab, or run `python3 backend/airpods.py restore` from its installed directory. If you enabled optional pairing recovery, undo it using the instructions in [pairing recovery](docs/PAIRING.md). If installed, remove the Bluetooth companion with `python3 backend/bluetooth_setup.py remove` first. Then remove the plugin (Omarchy restores the normal audio widget):
 
 ```sh
 omarchy plugin remove supercleanse.airpods

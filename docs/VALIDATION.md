@@ -44,3 +44,26 @@ The backend remains unchanged from 0.1.0, with all 72 tests passing. See NOTICE.
 A reported microphone failure was traced to the selected AirPods input being muted. Unmuting restored speech, confirmed by the user. The inherited Audio master switch also muted the microphone; the plugin now makes the main switch, its keyboard action, and speaker-icon right-click affect output only. A live keyboard test toggled the header twice and verified the microphone remained unmuted.
 
 Runtime logs also exposed a separate generated-rule bug: `actions.update-props` was emitted as a single rule key, which WirePlumber ignored. Rules now use nested `actions = { update-props = {...} }`. Native SPA parsing verifies the resulting object structure. Tests cover colon/underscore node names, optional suffixes, exact device boundaries, tracked upgrades, and rollback to the original baseline. All 76 local tests passed. Installed rules parsed correctly and WirePlumber restarted without the earlier unknown-key/no-actions warnings. The native parser regression is skipped on test runners without `spa-json-dump`; it ran on the tested laptop.
+
+## Bluetooth companion packaging (0.3.0)
+
+The focused `tests/test_bluetooth_setup.py` suite covers temporary-path installation, repeat installation, canonical-backend updates, retained previous-version backups, and independent removal. Ownership checks reject edited or added files, unowned directories, edited backups, symlinks, and group/other-writable package ancestors. Failure injection covers validation, deployment rescan, and disable errors.
+
+Fixture-based shell IPC tests exercise replacing exactly one existing Bluetooth slot, keeping its position/settings and the Audio entry unchanged, repeat enable, stock restoration on removal, and refusal when the stock slot is missing/duplicated or another Bluetooth clone is active. These tests execute the helper and simulate Omarchy's external commands; they do not establish live shell behavior. Where installed, the real `omarchy-plugin-validate` checks staged test bundles.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p test_bluetooth_setup.py -v
+```
+
+The assembled companion was staged under a temporary directory and passed the installed manifest validator. All four UI files were included and its backend matched the canonical source byte-for-byte. The packaging task itself made no live changes; the subsequent desktop checks are recorded below. The updater must be run after root-plugin updates because Omarchy has no nested-companion update hook.
+
+
+### Live Bluetooth recovery checks
+
+On the original laptop, the companion installed and replaced the existing Bluetooth slot without adding a bar entry or changing the Audio slot. Disable restored stock Bluetooth in place; re-enable restored the companion. The popup and recovery page were visually inspected. Keyboard input started discovery, selected the returned AirPods, and ran recovery successfully. Audio remained connected, and the plugin reported “AirPods connected and configured.”
+
+A live test caught a redundant Connect call timing out while music continued playing. Recovery now checks for a connected matching BlueZ device and its actual PipeWire audio sink before skipping that call; an ACL connection alone is insufficient. The corrected command succeeded against the playing AirPods.
+
+The Find AirPods control is outside device lists and has no device-count or Bluetooth-power visibility condition. The initial empty candidate list and later discovered candidate were both inspected. No deliberate unpair, radio-off, or physical adapter-removal test was performed during this feature validation. The earlier manual pairing recovery succeeded on this laptop; the packaged unpaired-device sequence is covered by mocked tests, not a new destructive hardware reset.
+
+The final local suite passed 114 tests. Both plugin manifests passed Omarchy validation. The final deployed recovery UI completed scan, explicit selection, and recovery using keyboard input. Cross-monitor conflict guards use Omarchy’s supported widget-instance lookup; simultaneous physical interactions on two monitors were not exercised.

@@ -13,4 +13,15 @@ This plugin adds an Audio / AirPods selector and the AirPods setup page. Its mai
 
 Future Omarchy audio-panel changes need to be reviewed and incorporated into plugin updates; the copied panel does not automatically track them.
 
+The Bluetooth companion panel and model are derived from Omarchy's built-in Bluetooth plugin under the same MIT license and copyright notice linked above.
+
+Source: https://github.com/omacom/omarchy/tree/quattro/shell/plugins/panels/bluetooth
+
+The installed Bluetooth base files copied on 2026-10-27 had these SHA-256 digests:
+
+- `Panel.qml`: `f51654a00e3bfe5d6ccfd42bbd972d9436f70a27d152baa43ccdcbd8c66e1225`
+- `Model.js`: `b34f3259c6553f20ce37619d2f390cd3293303266f89f2a6df0b6810da384417`
+
+The copies live in `companions/bluetooth/`. The companion adds the persistent Find AirPods action, recovery workflow, and diagnostics. Future upstream Bluetooth changes require review and incorporation into these copies.
+
 All original plugin code is covered by the repository's root MIT license.

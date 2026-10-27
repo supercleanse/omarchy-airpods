@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "supercleanse.airpods",
   "name": "Audio + AirPods",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "author": "supercleanse",
   "license": "MIT",
   "homepage": "https://github.com/supercleanse/omarchy-airpods",
-  "description": "Stock audio controls with an AirPods status and setup tab.",
+  "description": "Audio controls and AirPods setup, with an optional Bluetooth recovery panel.",
   "kinds": [
     "bar-widget"
   ],

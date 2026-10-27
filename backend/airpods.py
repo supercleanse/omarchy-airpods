@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -28,6 +29,17 @@ UNITS = ('mpris-proxy.service', 'bt-media-watch.service')
 
 class Error(Exception):
     pass
+
+
+class RecoveryError(Error):
+    def __init__(self, outcome, message):
+        super().__init__(message)
+        self.outcome = outcome
+
+
+def public_devices(devices):
+    return [{k: d[k] for k in ('address', 'name', 'connected', 'paired', 'trusted')}
+            for d in devices]
 
 
 def validate_mac(value):
@@ -163,7 +175,7 @@ def unwrap(value):
 
 
 class System:
-    def devices(self):
+    def objects(self):
         raw = json.loads(run(['busctl', '--system', '--json=short', '--timeout=15', 'call',
                               'org.bluez', '/', 'org.freedesktop.DBus.ObjectManager', 'GetManagedObjects']))
         objects = unwrap(raw)
@@ -171,6 +183,10 @@ class System:
             objects = objects[0]
         if not isinstance(objects, dict):
             raise Error('Unexpected BlueZ response')
+        return objects
+
+    def devices(self):
+        objects = self.objects()
         result = []
         for path, interfaces in objects.items():
             props = interfaces.get('org.bluez.Device1')
@@ -187,6 +203,100 @@ class System:
                                paired=bool(props.get('Paired')), trusted=bool(props.get('Trusted')),
                                eligible=known or (apple and audio), airpods=known, path=path))
         return result
+
+    def power_on(self, device=None):
+        adapters = {path: interfaces['org.bluez.Adapter1']
+                    for path, interfaces in self.objects().items()
+                    if 'org.bluez.Adapter1' in interfaces}
+        if device:
+            path = device['path'].rsplit('/', 1)[0]
+            adapters = {path: adapters[path]} if path in adapters else {}
+        if not adapters:
+            raise RecoveryError('no_adapter', 'No Bluetooth adapter available. Check Bluetooth hardware and service.')
+        if len(adapters) != 1:
+            raise RecoveryError('adapter_choice_required', 'Multiple Bluetooth adapters found. Use the Bluetooth panel to search on the intended adapter.')
+        path, props = next(iter(adapters.items()))
+        if not props.get('Powered', False):
+            try:
+                # Omarchy off is an rfkill soft block, so Powered=true alone
+                # cannot undo it. Only request ON; never toggle or cycle radios.
+                helper = shutil.which('omarchy-bluetooth-power')
+                if helper:
+                    run([helper, 'on'], timeout=15)
+                    refreshed = self.objects().get(path, {}).get('org.bluez.Adapter1', {})
+                    if refreshed.get('Powered', False):
+                        return
+                # The helper may see another powered adapter and finish before
+                # this one is on. Also supports systems without the helper.
+                run(['busctl', '--system', '--timeout=15', 'set-property', 'org.bluez',
+                     path, 'org.bluez.Adapter1', 'Powered', 'b', 'true'])
+            except Exception as exc:
+                raise RecoveryError('power_failed', 'Bluetooth could not be enabled. Unblock Bluetooth in the system controls or hardware switch, then try again.') from exc
+
+    def discover(self):
+        self.power_on()
+        # One persistent bluetoothctl connection owns the discovery session and
+        # BR/EDR filter. Exiting releases only that session, not other scanners.
+        output = run(['bluetoothctl', '--timeout', '10', 'scan', 'bredr'], timeout=15)
+        # bluetoothctl's timed noninteractive mode may exit zero even when
+        # StartDiscovery fails. Never present cached objects as a successful scan.
+        if ('Discovery started' not in output or any(message in output for message in (
+                'Failed to start discovery', 'Failed to set discovery filter',
+                'SetDiscoveryFilter failed', 'No default controller available'))):
+            raise RecoveryError('discovery_failed', 'Classic Bluetooth discovery did not start. Check adapter power and Bluetooth permissions, then try again.')
+        return self.devices()
+
+    def trust(self, device):
+        run(['busctl', '--system', '--timeout=15', 'set-property', 'org.bluez',
+             device['path'], 'org.bluez.Device1', 'Trusted', 'b', 'true'])
+
+    def pair(self, device):
+        # Never use bluetoothctl pair: it may remove an existing bond first.
+        run(['busctl', '--system', '--timeout=30', 'call', 'org.bluez',
+             device['path'], 'org.bluez.Device1', 'Pair'], timeout=35)
+
+    def connect(self, device):
+        try:
+            run(['busctl', '--system', '--timeout=15', 'call', 'org.bluez',
+                 device['path'], 'org.bluez.Device1', 'Connect'])
+        except Error as exc:
+            if not re.search(r'\bAlreadyConnected\b|\balready connected\b', str(exc), re.I):
+                raise
+
+    def audio_ready(self, device):
+        """Require a real profile sink attached to this exact BlueZ device.
+
+        Connected alone can be an ACL-only link. Virtual microphone nodes and
+        unrelated/default audio sinks are not proof of an established profile.
+        A suspended real sink still represents a usable, idle audio profile.
+        """
+        if not device['connected']:
+            return False
+        try:
+            objects = json.loads(run(['pw-dump'], timeout=5))
+            cards = set()
+            for obj in objects:
+                props = obj.get('info', {}).get('props', {})
+                if (obj.get('type') == 'PipeWire:Interface:Device' and
+                        props.get('device.api') == 'bluez5' and
+                        props.get('api.bluez5.path') == device['path'] and
+                        str(props.get('api.bluez5.address', '')).upper() == device['address'] and
+                        props.get('api.bluez5.connection') == 'connected'):
+                    cards.add(str(obj['id']))
+            for obj in objects:
+                info = obj.get('info', {})
+                props = info.get('props', {})
+                if (obj.get('type') == 'PipeWire:Interface:Node' and
+                        info.get('state') in ('running', 'idle', 'suspended') and
+                        props.get('media.class') == 'Audio/Sink' and
+                        props.get('device.api') == 'bluez5' and
+                        props.get('api.bluez5.profile') and
+                        str(props.get('device.id')) in cards):
+                    return True
+        except (Error, ValueError, TypeError, KeyError, AttributeError):
+            # Missing/unavailable PipeWire cannot prove that Connect is redundant.
+            pass
+        return False
 
     def unit(self, name):
         out = run(['systemctl', '--user', 'show', name, '--property=LoadState,ActiveState,UnitFileState'])
@@ -264,11 +374,25 @@ class Manager:
     def save(self, name, value):
         atomic_write(self.state / name, json.dumps(value, sort_keys=True).encode())
 
+    def known_addresses(self):
+        state = self.read('state.json')
+        if not state:
+            return set()
+        # Read the plugin's recorded output, never a foreign configuration or
+        # nearby Apple's manufacturer data. Also supports pre-recovery installs.
+        value = state['entries']['config']['after']
+        if value['kind'] != 'file':
+            return set()
+        text = base64.b64decode(value['data']).decode('utf-8')
+        return {validate_mac(mac.replace('_', ':')) for mac in re.findall(
+            r'device[.]name = "bluez_card[.]((?:[0-9A-F]{2}_){5}[0-9A-F]{2})"', text)}
+
     def select(self, address=None):
         if address is not None:
             address = validate_mac(address)
         devices = self.system.devices()
-        selected = [d for d in devices if d['paired'] and (d['address'] == address and d['eligible'] if address else d['airpods'])]
+        known = self.known_addresses() if address else set()
+        selected = [d for d in devices if d['paired'] and (d['address'] == address and (d['eligible'] or address in known) if address else d['airpods'])]
         if not selected:
             raise Error('No matching paired AirPods/Apple headphones; explicit selection requires Apple audio identification')
         if address and len(selected) != 1:
@@ -302,13 +426,16 @@ class Manager:
             self.save('state.json', pending['previous'])
         put(self.state / 'pending.json', {'kind': 'absent'})
 
-    def apply(self, address=None):
+    def apply(self, address=None, preserve_known=False):
         self.recover()
         selected = self.select(address)
         previous = self.read('state.json')
         if previous:
             self.check(previous['entries'])
-        desired = {'config': file_value(fragment([d['address'] for d in selected]))}
+        addresses = {d['address'] for d in selected}
+        if preserve_known:
+            addresses.update(self.known_addresses())
+        desired = {'config': file_value(fragment(addresses))}
         services = {}
         for unit in UNITS:
             info = self.system.unit(unit)
@@ -377,6 +504,104 @@ class Manager:
         self.system.reconnect(device)
         return 'Selected device reconnected'
 
+    def recovery_result(self, outcome, devices, message, configuration_pending=False):
+        return dict(configured=self.read('state.json') is not None,
+                    devices=public_devices(devices), issues=[], message=message,
+                    outcome=outcome, configuration_pending=configuration_pending)
+
+    def candidates(self, devices):
+        known = self.known_addresses()
+        return [d for d in devices if d['airpods'] or d['address'] in known]
+
+    def discover(self):
+        try:
+            candidates = self.candidates(self.system.discover())
+        except RecoveryError:
+            raise
+        except Exception as exc:
+            raise RecoveryError('discovery_failed', 'Bluetooth search failed or timed out. Check the adapter, open the case in pairing mode, and try again.') from exc
+        count = len(candidates)
+        outcome = 'not_found' if not count else 'choice_required' if count > 1 else 'candidate_found'
+        message = ('No AirPods found. Open the case and enable pairing mode, then search again.' if not count else
+                   'Choose the AirPods to recover.' if count > 1 else 'Select Recover to connect these AirPods.')
+        return self.recovery_result(outcome, candidates, message)
+
+    def recover_device(self, address):
+        if not address:
+            raise RecoveryError('device_required', 'Choose one device, then use recover --device MAC.')
+        address = validate_mac(address)
+        if self.read('pending.json'):
+            raise RecoveryError('restore_required', 'An interrupted configuration operation needs restore before Bluetooth recovery.')
+        state = self.read('state.json')
+        if state:
+            self.check(state['entries'])
+
+        def current():
+            matches = [d for d in self.candidates(self.system.devices()) if d['address'] == address]
+            if not matches:
+                raise RecoveryError('not_found', 'Selected AirPods are unavailable. Open the case in pairing mode and search again.')
+            if len(matches) != 1:
+                raise RecoveryError('adapter_choice_required', 'This address appears on multiple adapters. Select it in the Bluetooth panel.')
+            return matches[0]
+
+        stage = 'discovery'
+        try:
+            # A missing object needs discovery; a cached unrelated Apple device
+            # is never made eligible just because its address was supplied.
+            devices = self.system.devices()
+            if not any(d['address'] == address for d in devices):
+                self.system.discover()
+            device = current()
+            stage = 'power'
+            self.system.power_on(device)
+            stage = 'trust'
+            if not device['trusted']:
+                self.system.trust(device)
+            device = current()
+            if not device['trusted']:
+                raise RecoveryError('trust_failed', 'BlueZ did not confirm trust. Check Bluetooth permissions and try again.')
+            stage = 'pair'
+            if not device['paired']:
+                self.system.pair(device)
+                device = current()
+                if not device['paired']:
+                    raise RecoveryError('pair_failed', 'Pairing was not confirmed. Open pairing mode and try again; no bond was removed.')
+            stage = 'configuration'
+            addresses = self.known_addresses() | {address}
+            desired = file_value(fragment(addresses))
+            # Keep all current audio connections intact. A new/different fragment
+            # requires a WP restart; leave that explicit apply step to the user.
+            configuration_pending = (snapshot(self.paths['config']) != desired and
+                                     any(d['connected'] for d in self.system.devices()))
+            if not configuration_pending:
+                self.apply(address, preserve_known=True)
+            stage = 'connect'
+            device = current()
+            # Do not perturb a working profile. Pair can establish only an ACL,
+            # so Connected=true alone must still lead to an explicit Connect.
+            if not self.system.audio_ready(device):
+                try:
+                    self.system.connect(device)
+                except Error:
+                    # BlueZ may time out while audio remains/becomes healthy.
+                    # Re-read both layers; never swallow failure for an ACL alone.
+                    device = current()
+                    if not self.system.audio_ready(device):
+                        raise
+            device = current()
+            if not device['connected']:
+                raise RecoveryError('connect_failed', 'Connection was not confirmed. Keep the AirPods nearby and try Recover again.')
+            message = ('AirPods connected. Audio configuration is pending; choose Setup (apply) when audio can be interrupted.'
+                       if configuration_pending else 'AirPods connected and configured.')
+            return self.recovery_result('recovered', [device], message, configuration_pending)
+        except RecoveryError:
+            raise
+        except Exception as exc:
+            # Pairing errors may carry identifiers or authentication data. Expose
+            # the failed stage and next action, never raw command diagnostics.
+            raise RecoveryError(stage + '_failed', 'Recovery failed or timed out during ' + stage +
+                                '. Check Bluetooth, open pairing mode if unpaired, and try again. Existing bonds were not removed; trust or a completed pairing may remain.') from exc
+
     def status(self):
         devices = self.system.devices()
         state = self.read('state.json')
@@ -414,27 +639,48 @@ def main(argv=None):
 
     old_handler = signal.signal(signal.SIGALRM, expired)
     signal.alarm(90)
+    command = None
     try:
         parser = Parser(add_help=False)
-        parser.add_argument('command', choices=['status', 'apply', 'restore', 'reconnect'])
+        parser.add_argument('command', choices=['status', 'apply', 'restore', 'reconnect', 'discover', 'recover'])
         parser.add_argument('--device')
+        parser.add_argument('--preserve-known', action='store_true')
         args = parser.parse_args(argv)
+        command = args.command
+        if args.preserve_known and args.command != 'apply':
+            raise Error('--preserve-known is only valid with apply')
         if args.device:
             validate_mac(args.device)
-        if args.device and args.command not in ('apply', 'reconnect'):
-            raise Error('--device only applies to apply/reconnect')
+        if args.device and args.command not in ('apply', 'reconnect', 'recover'):
+            raise Error('--device only applies to apply/reconnect/recover')
         manager = Manager()
         with lock(manager.state):
             if args.command == 'status':
                 result = manager.status()
+            elif args.command == 'discover':
+                result = manager.discover()
+            elif args.command == 'recover':
+                result = manager.recover_device(args.device)
             else:
-                message = getattr(manager, args.command)(args.device) if args.command in ('apply', 'reconnect') else manager.restore()
+                if args.command == 'apply':
+                    message = manager.apply(args.device, preserve_known=args.preserve_known)
+                else:
+                    message = manager.reconnect(args.device) if args.command == 'reconnect' else manager.restore()
                 # Do not make successful mutation depend on a second BlueZ query.
                 result = dict(configured=manager.read('state.json') is not None, devices=[], issues=[], message=message)
         print(json.dumps(result))
         return 0
+    except RecoveryError as e:
+        print(json.dumps(dict(configured=False, devices=[], issues=[str(e)], message=str(e),
+                              outcome=e.outcome, configuration_pending=False)))
+        return 1
     except Exception as e:
-        print(json.dumps(dict(configured=False, devices=[], issues=[str(e)], message='Operation failed')))
+        if command in ('discover', 'recover'):
+            message = 'Recovery request could not complete. Check the selected address, configuration conflicts, or an operation already in progress.'
+            print(json.dumps(dict(configured=False, devices=[], issues=[message], message=message,
+                                  outcome='operation_failed', configuration_pending=False)))
+        else:
+            print(json.dumps(dict(configured=False, devices=[], issues=[str(e)], message='Operation failed')))
         return 1
     finally:
         signal.alarm(0)
