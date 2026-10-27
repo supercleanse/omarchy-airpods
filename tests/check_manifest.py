@@ -11,6 +11,7 @@ assert not manifest['id'].startswith('omarchy.') and '..' not in manifest['id']
 for field in ('name', 'version', 'author', 'description', 'license'):
     assert isinstance(manifest[field], str) and manifest[field].strip(), field
 assert manifest['kinds'] == ['bar-widget']
+assert manifest['omarchy']['clonedFrom'] == 'omarchy.audio'
 assert manifest['barWidget']['defaultSection'] in ('left', 'center', 'right')
 assert manifest['entryPoints']['barWidget']
 for entry in manifest['entryPoints'].values():
@@ -20,6 +21,6 @@ for entry in manifest['entryPoints'].values():
 for path in root.rglob('*'):
     if '.git' not in path.parts:
         assert not path.is_symlink(), str(path)
-for name in ('README.md', 'LICENSE', 'docs/PAIRING.md', 'docs/VALIDATION.md'):
+for name in ('README.md', 'LICENSE', 'docs/PAIRING.md', 'docs/VALIDATION.md', 'NOTICE.md', 'licenses/OMARCHY-MIT.txt'):
     assert (root / name).is_file(), name
 print('Package metadata, entry points, docs, and symlink checks passed')

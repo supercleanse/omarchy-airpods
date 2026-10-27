@@ -6,11 +6,16 @@ import Quickshell.Io
 import qs.Commons as Commons
 import qs.Ui as Ui
 
-Ui.Panel {
+Item {
   id: root
-  moduleName: "supercleanse.airpods"
-  ipcTarget: "supercleanse.airpods"
-  manageIpc: false
+  required property var host
+  required property var popup
+  readonly property var bar: host.bar
+  readonly property bool opened: host.opened
+  function open() { host.open() }
+  function close() { host.close() }
+  function toggle() { host.toggle() }
+  function focusFirst() { refreshButton.forceActiveFocus() }
 
   readonly property string backendPath: decodeURIComponent(Qt.resolvedUrl("backend/airpods.py").toString().replace(/^file:\/\//, ""))
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
@@ -31,8 +36,7 @@ Ui.Panel {
   property bool undoArmed: false
   readonly property int connectedCount: devices.filter(function(d) { return d.connected === true }).length
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  implicitHeight: content.implicitHeight
 
   function refresh() {
     if (busy) { refreshPending = true; return }
@@ -55,12 +59,13 @@ Ui.Panel {
   }
 
   IpcHandler {
-    target: root.ipcTarget
+    target: "supercleanse.airpods"
     function open(): void { root.open() }
     function close(): void { root.close() }
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
+    function showPage(page: string): string { return root.host.showPage(page) }
     function refresh(): string { root.refresh(); return "ok" }
     function diagnostics(): string {
       return JSON.stringify({
@@ -73,12 +78,21 @@ Ui.Panel {
         deviceCount: root.devices.length,
         connectedCount: root.connectedCount,
         opened: root.opened,
+        page: root.host.selectedPage,
+        selectedPage: root.host.selectedPage,
+        outputCount: root.host.displayAudioSinks.length,
+        inputCount: root.host.displayAudioSources.length,
+        mixerCount: root.host.displayAudioStreams.length,
+        outputVolume: root.host.outputVolume,
+        inputVolume: root.host.inputVolume,
+        outputMuted: root.host.outputMuted,
+        inputMuted: root.host.inputMuted,
         // Screen-local logical coordinates; dimensions already include insets.
         card: {
-          x: panel.cardOrigin.x,
-          y: panel.cardOrigin.y,
-          width: panel.contentWidth,
-          height: panel.contentHeight
+          x: root.popup.cardOrigin.x,
+          y: root.popup.cardOrigin.y,
+          width: root.popup.contentWidth,
+          height: root.popup.contentHeight
         }
       })
     }
@@ -169,35 +183,6 @@ Ui.Panel {
     running: root.undoArmed
     onTriggered: root.undoArmed = false
   }
-
-  Ui.BarIconButton {
-    id: button
-    anchors.fill: parent
-    bar: root.bar
-    text: "󰋋"
-    tooltipText: "AirPods · " + (root.statusKnown ? root.connectedCount + " connected" : "Status unavailable")
-    active: root.opened
-    activeFocusOnTab: true
-    Accessible.role: Accessible.Button
-    Accessible.name: "AirPods"
-    Keys.onReturnPressed: root.toggle()
-    Keys.onEnterPressed: root.toggle()
-    Keys.onSpacePressed: root.toggle()
-    onPressed: function(mouseButton) {
-      if (mouseButton === Qt.MiddleButton) root.refresh()
-      else root.toggle()
-    }
-  }
-
-  Ui.KeyboardPanel {
-    id: panel
-    anchorItem: button
-    owner: root
-    bar: root.bar
-    open: root.opened
-    focusTarget: refreshButton
-    contentWidth: fittedContentWidth(Commons.Style.space(350))
-    contentHeight: fittedContentHeight(content.implicitHeight, Commons.Style.space(560))
 
     ScrollView {
       id: scroll
@@ -323,7 +308,6 @@ Ui.Panel {
         }
       }
     }
-  }
 
   component LabelText: Text {
     textFormat: Text.PlainText

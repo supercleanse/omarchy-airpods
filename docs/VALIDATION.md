@@ -30,3 +30,11 @@ The GitHub Actions workflow records automated checks for each commit. Live Omarc
 - Other AirPods generations and coexistence with other Bluetooth headphones.
 
 When reporting a problem, include package versions, AirPods model, the failing action, and the plugin status. Remove Bluetooth addresses and personal device names before posting logs. Do not include pairing databases or keys.
+
+## Audio panel integration (0.2.0)
+
+The separate AirPods icon was removed before migration. The cloned audio widget replaced the original Audio entry at its existing position; every other bar entry retained its order. Disable restored the stock Audio widget in place, and enable replaced it again without adding another icon.
+
+Both Audio and AirPods pages were opened and visually inspected in the running shell. The Audio page exposed the existing output/input devices and app mixer. The AirPods page reported configured controls and the connected device. Actual keyboard events verified Ctrl+Tab switching, Escape dismissal, and defaulting to Audio when opened through the existing `omarchy.audio` IPC. Arrow keys on the AirPods page did not alter either audio volume. No apply/restore or Bluetooth restart was performed for this UI migration.
+
+The backend remains unchanged from 0.1.0, with all 72 tests passing. See NOTICE.md for the stock audio source, included license, and the scoped-API limitation on selected-media highlighting.

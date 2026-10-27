@@ -1,18 +1,25 @@
 {
   "schemaVersion": 1,
   "id": "supercleanse.airpods",
-  "name": "AirPods",
-  "version": "0.1.0",
+  "name": "Audio + AirPods",
+  "version": "0.2.0",
   "author": "supercleanse",
   "license": "MIT",
   "homepage": "https://github.com/supercleanse/omarchy-airpods",
-  "description": "Paired AirPods status and explicit audio and stem-control setup.",
-  "kinds": ["bar-widget"],
-  "entryPoints": {"barWidget": "Panel.qml"},
+  "description": "Stock audio controls with an AirPods status and setup tab.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "AudioPanel.qml"
+  },
   "barWidget": {
-    "displayName": "AirPods",
+    "displayName": "Audio + AirPods",
     "category": "Audio",
     "defaultSection": "right",
     "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.audio"
   }
 }
